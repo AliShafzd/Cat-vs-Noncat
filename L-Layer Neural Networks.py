@@ -1,3 +1,8 @@
+"""
+author: Ali Shafiezadeh
+
+Implement a deep l-layer neural network to classify cat-vs-noncat images
+"""
 # Import useful packages
 import numpy as np
 import matplotlib.pyplot as plt
@@ -117,7 +122,6 @@ def initialize_parameters_deep(layer_dims):
                     bl -- bias vector of shape (layer_dims[l], 1)
     """
 
-    np.random.seed(1)
     parameters = {}
     L = len(layer_dims)  # number of layers in the network
 
@@ -221,7 +225,7 @@ def L_model_forward(X, parameters):
     return AL, caches
 
 
-def compute_cost(AL, Y):
+def compute_cost(AL, Y, caches):
     """
     Implement the cost function.
 
@@ -232,6 +236,8 @@ def compute_cost(AL, Y):
     Returns:
     cost -- cross-entropy cost
     """
+    # Compute sigma(W ^ 2)
+    # for i in range(len())
 
     m = Y.shape[1]
 
@@ -244,7 +250,7 @@ def compute_cost(AL, Y):
     return cost
 
 
-def linear_backward(dZ, cache):
+def linear_backward(dZ, cache, regu_val):
     """
     Implement the linear portion of backward propagation for a single layer (layer l)
 
@@ -260,7 +266,7 @@ def linear_backward(dZ, cache):
     A_prev, W, b = cache
     m = A_prev.shape[1]
 
-    dW = 1. / m * np.dot(dZ, A_prev.T)
+    dW = 1. / m * np.dot(dZ, A_prev.T) + regu_val / m * W
     db = 1. / m * np.sum(dZ, axis=1, keepdims=True)
     dA_prev = np.dot(W.T, dZ)
 
@@ -271,7 +277,7 @@ def linear_backward(dZ, cache):
     return dA_prev, dW, db
 
 
-def linear_activation_backward(dA, cache, activation):
+def linear_activation_backward(dA, cache, activation, regu_val):
     """
     Implement the backward propagation for the LINEAR->ACTIVATION layer.
 
@@ -289,16 +295,16 @@ def linear_activation_backward(dA, cache, activation):
 
     if activation == "relu":
         dZ = relu_backward(dA, activation_cache)
-        dA_prev, dW, db = linear_backward(dZ, linear_cache)
+        dA_prev, dW, db = linear_backward(dZ, linear_cache, regu_val)
 
     elif activation == "sigmoid":
         dZ = sigmoid_backward(dA, activation_cache)
-        dA_prev, dW, db = linear_backward(dZ, linear_cache)
+        dA_prev, dW, db = linear_backward(dZ, linear_cache, regu_val)
 
     return dA_prev, dW, db
 
 
-def L_model_backward(AL, Y, caches):
+def L_model_backward(AL, Y, caches, regu_val):
     """
     Implement the backward propagation for the [LINEAR->RELU] * (L-1) -> LINEAR -> SIGMOID group
 
@@ -327,13 +333,14 @@ def L_model_backward(AL, Y, caches):
     current_cache = caches[L - 1]
     grads["dA" + str(L - 1)], grads["dW" + str(L)], grads["db" + str(L)] = linear_activation_backward(dAL,
                                                                                                       current_cache,
-                                                                                                      activation="sigmoid")
+                                                                                                      "sigmoid",
+                                                                                                      regu_val)
 
     for l in reversed(range(L - 1)):
         # lth layer: (RELU -> LINEAR) gradients.
         current_cache = caches[l]
         dA_prev_temp, dW_temp, db_temp = linear_activation_backward(grads["dA" + str(l + 1)], current_cache,
-                                                                    activation="relu")
+                                                                    "relu", regu_val)
         grads["dA" + str(l)] = dA_prev_temp
         grads["dW" + str(l + 1)] = dW_temp
         grads["db" + str(l + 1)] = db_temp
@@ -394,12 +401,13 @@ def predict(X, y, parameters):
     # print results
     # print ("predictions: " + str(p))
     # print ("true labels: " + str(y))
-    print("Accuracy: " + str(np.sum((p == y) / m)))
+    accuracy = np.sum((p == y) / m)
+    print("Accuracy: " + str(accuracy))
 
-    return p
+    return p, accuracy
 
 
-def L_layer_model(X, Y, layers_dims, learning_rate=0.0075, num_iterations=3000, print_cost=False):
+def L_layer_model(X, Y, layers_dims, learning_rate=0.0075, num_iterations=200, print_cost=False, regu_val=0.1):
     """
     Implements a L-layer neural network: [LINEAR->RELU]*(L-1)->LINEAR->SIGMOID.
 
@@ -428,10 +436,10 @@ def L_layer_model(X, Y, layers_dims, learning_rate=0.0075, num_iterations=3000, 
         AL, caches = L_model_forward(X, parameters)
 
         # Compute cost.
-        cost = compute_cost(AL, Y)
+        cost = compute_cost(AL, Y, regu_val)
 
         # Backward propagation.
-        grads = L_model_backward(AL, Y, caches)
+        grads = L_model_backward(AL, Y, caches, regu_val)
 
         # Update parameters.
         parameters = update_parameters(parameters, grads, learning_rate)
@@ -439,10 +447,45 @@ def L_layer_model(X, Y, layers_dims, learning_rate=0.0075, num_iterations=3000, 
         # Print the cost every 100 iterations
         if print_cost and i % 100 == 0 or i == num_iterations - 1:
             print("Cost after iteration {}: {}".format(i, np.squeeze(cost)))
-        if i % 100 == 0 or i == num_iterations:
-            costs.append(cost)
+            if i % 100 == 0 or i == num_iterations:
+                costs.append(cost)
 
     return parameters, costs
+
+
+def lambda_find(X_train, y_train, X_test, y_test, layers_dim):
+    """
+    This function finds the best value of layers_dim with respect to the value of J_test
+
+    Arguments:
+    X -- data, numpy array of shape (num_px * num_px * 3, number of examples)
+    Y -- true "label" vector (containing 0 if cat, 1 if non-cat), of shape (1, number of examples)
+    layers_dims -- list containing the input size and each layer size, of length (number of layers + 1).
+
+    Returns:
+    optimized lambda (regularization value)
+    """
+    # Settings
+    regu_vals = np.arange(0, 50, 1)
+    accuracy_test = []
+
+    # Implement a loop to calculate J_test for each lambda
+    for i in regu_vals:
+        # Compute parameters of the model with given lambda
+        parameters, costs = L_layer_model(X_train, y_train, layers_dim, regu_val=i, num_iterations=2000)
+
+        pred_test, accuracy = predict(X_test, y_test,
+                                           parameters)  # Evaluate the model's prediction on the test set
+
+        accuracy_test.append(accuracy)
+
+    # Find the maximum of accuracy_test
+    I = accuracy_test.index(max(accuracy_test))
+
+    # Optimized lambda
+    opt_regu = regu_vals[I]
+
+    return opt_regu, max(accuracy_test)
 
 
 train_x_orig, train_y, test_x_orig, test_y, classes = load_data()
@@ -455,8 +498,14 @@ test_x_flatten = test_x_orig.reshape(test_x_orig.shape[0], -1).T
 train_x = train_x_flatten/255.
 test_x = test_x_flatten/255.
 
-layers_dims = [train_x.shape[0], 20, 7, 5, 1]
-parameters, costs = L_layer_model(train_x, train_y, layers_dims)
+layers_dims = [train_x.shape[0], 15, 7, 5, 1]
+
+# Find the best regularization value
+regu_val, accuracy = lambda_find(train_x, train_y, test_x, test_y, layers_dims)
+
+# Run model
+parameters, costs = L_layer_model(train_x, train_y, layers_dims,
+                                  regu_val=regu_val, num_iterations=2000, print_cost=True)
 
 # Plot cost for every 100 iteration to track the error of model
 plt.plot(costs)
@@ -465,5 +514,5 @@ plt.ylabel('Cost of the model for each iteration')
 plt.title('Cost - iteration plot')
 plt.show()
 
-pred_train = predict(train_x, train_y, parameters)  # Evaluate the model's prediction on the train set
-pred_test = predict(test_x, test_y, parameters)  # Evaluate the model's prediction on the test set
+pred_train, accuracy_train = predict(train_x, train_y, parameters)  # Evaluate the model's prediction on the train set
+pred_test, accuracy_test = predict(test_x, test_y, parameters)  # Evaluate the model's prediction on the test set
